@@ -6,6 +6,7 @@ extern crate libc;
 use std::fmt;
 use std::cast;
 use std::str;
+use std::io::fs;
 
 use std::strbuf::StrBuf;
 use std::io::MemWriter;
@@ -30,6 +31,14 @@ pub struct Node {
 
 pub struct Emitter {
     _c: ll::yaml_emitter_t
+}
+
+#[deriving(Clone, Show)]
+enum NodeOption<T, U, V> {
+    NoNode,
+    ScalarNode(T),
+    SequenceNode(U),
+    MappingNode(V)
 }
 
 impl Parser {
@@ -60,7 +69,7 @@ impl Parser {
         }
     }
 
-    fn set_input_string(&mut self, input: &'static str) {
+    fn set_input_string(&mut self, input: ~str) {
         let c_str = input.to_c_str();
         let c_str_len = input.len();
         unsafe {
@@ -111,17 +120,29 @@ impl Parser {
     }
 }
 
-/*
 impl Node {
-    fn new() -> Node {
-        unsafe {
-            Node {
-                _c: std::mem::uninit()
-            }
+    fn data(&self) -> NodeOption<&str, ~[~str], Node> {
+        match self._c._type {
+            ll::YAML_NO_NODE => NoNode,
+            ll::YAML_SCALAR_NODE => {
+                unsafe {
+                    let mut_self: &mut Node = cast::transmute(self);
+                    let node_data = mut_self._c.data.scalar();
+
+                    let cv = cast::transmute(std::raw::Slice::<u8> {
+                        data: (*node_data).value as *u8,
+                        len: (*node_data).length as uint
+                    });
+                    //let v = cv.as_slice();
+                    
+                    ScalarNode(str::from_utf8(cv).unwrap())
+                }
+            },
+            ll::YAML_SEQUENCE_NODE => SequenceNode(~[~"test"]),
+            ll::YAML_MAPPING_NODE => MappingNode(*self)
         }
     }
 }
-*/
 
 impl Index<~str, Option<Node>> for Node {
     fn index(&self, key: &~str) -> Option<Node> {
@@ -166,23 +187,11 @@ impl Index<~str, Option<Node>> for Node {
                         
                         pair = pair.offset(1);
                     }
-                    /*
-                    while pair != pairs.end && (*pair).value != 0 {
-                        if (*pair).key as uint == self.index {
-                            match doc.get_node((*pair).value as uint) {
-                                Some(n) => Some(n),
-                                None => fail!("libYAML broke somehow.")
-                            };
-                        }
-                        
-                        pair = pair.offset(1);
-                    }
-                    */
                 }
+                None
             }
         }
 
-        None
     }
 }
 
@@ -381,10 +390,29 @@ pub fn get_version_string() -> ~str {
     }
 }
 
+pub fn load(file: &mut fs::File) -> Document {
+    let data = match file.read_to_str() {
+        Ok(v) => v,
+        Err(e) => fail!(e)
+    };
+
+    loads(data)
+}
+
+pub fn loads(data: ~str) -> Document {
+    let mut parser = Parser::new();
+    let mut document = Document::new();
+
+    parser.set_input_string(data);
+    parser.load(&mut document);
+
+    document
+}
 
 fn main() {
     println!("{}", get_version_string());
 
+    /*
     let mut parser = Parser::new();
     let mut emitter = Emitter::new();
     
@@ -399,7 +427,12 @@ fn main() {
         Ok(_) => (),
         Err(e) => fail!(e)
     };
-    
+    */
+
+    let mut file = fs::File::open(&Path::new("test.yaml")).unwrap();
+
+    let mut document = load(&mut file);
+
     match document.get_root_node() {
         Ok(node) => println!("Root: {}\n", node),
         Err(e) => fail!(e)
@@ -417,9 +450,10 @@ fn main() {
     println!("");
 
     let root = document.get_root_node().unwrap();
-    root[~"Config"];
 
-    println!("{}", root[~"Config"].unwrap()[~"hfst"].unwrap()[~"Gen"].unwrap());
+    let dunno = root[~"Config"].unwrap()[~"hfst"].unwrap()[~"Gen"].unwrap().data();
+
+    println!("{}", dunno);
     //println!("{}", emitter.dumps(&mut document));
 }
 
